@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 
 const fadeInUp = {
@@ -5,19 +6,167 @@ const fadeInUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 1, ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number] } },
 }
 
-const PR_ROWS = [
-  { num: '#10702', title: 'fix: replace in-place dataclass mutations with dataclasses.replace() — 10 fixes across 6 files', repo: 'deepset-ai/haystack',                     date: 'Mar 2026', status: 'merged' },
-  { num: '#60914', title: 'fix(cli): route skills list output to stdout when --json is active — unblocks automation tooling',   repo: 'openclaw/openclaw',                   date: 'Apr 2026', status: 'merged' },
-  { num: '#62337', title: 'fix(daemon): skip machine-scope fallback on permission-denied bus errors — merged by Peter Steinberger (founder)', repo: 'openclaw/openclaw',     date: 'Apr 2026', status: 'merged' },
-  { num: '#54971', title: 'test(plugins): Feishu re-registration regression guard — "Thanks @Aftabbs!"',                        repo: 'openclaw/openclaw',                   date: 'Apr 2026', status: 'merged' },
-  { num: '#11117', title: 'docs: HTML → JSX comments across 45 files — unblocks Docusaurus v4 migration',                      repo: 'deepset-ai/haystack',                 date: 'Apr 2026', status: 'merged' },
-  { num: '#3138',  title: 'test(weaviate): replace in-place Document mutations with dataclasses.replace()',                     repo: 'deepset-ai/haystack-core-integrations', date: 'Apr 2026', status: 'merged' },
-  { num: '#3199',  title: 'fix(amazon-bedrock): prevent double-wrapping of cachepoint in streaming responses',                  repo: 'deepset-ai/haystack-core-integrations', date: 'Apr 2026', status: 'merged' },
-  { num: '#2738',  title: 'fix(wrappers): suppress Pydantic warnings for ParsedBetaMessage — merged by jacoblee93',            repo: 'langchain-ai/langsmith-sdk',          date: 'Apr 2026', status: 'merged' },
-  { num: '#3177',  title: 'fix(google-genai): cached_content_token_count in streaming responses',                              repo: 'deepset-ai/haystack-core-integrations', date: 'Apr 2026', status: 'merged' },
-]
+const GITHUB_USERNAME = 'Aftabbs'
+
+// Maps a repo's GitHub org/login to the umbrella name used for grouping
+// (a company can span several orgs). Unlisted orgs fall back to their raw
+// login, so a contribution to a new org never disappears from the tabs.
+const ORG_DISPLAY_NAMES: Record<string, string> = {
+  'deepset-ai': 'deepset (Haystack)',
+  openclaw: 'OpenClaw',
+  'langchain-ai': 'LangChain',
+  AzureCosmosDB: 'Microsoft Azure',
+  microsoft: 'Microsoft',
+  Microsoft: 'Microsoft',
+}
+
+function orgDisplayName(repo: string): string {
+  const org = repo.split('/')[0]
+  return ORG_DISPLAY_NAMES[org] || org
+}
+
+type Status = 'open' | 'merged'
+
+interface Contribution {
+  status: Status
+  repo: string
+  title: string
+  desc: string
+  url: string
+  updated: string
+}
+
+interface GithubSearchItem {
+  repository_url: string
+  title: string
+  body: string | null
+  html_url: string
+  state: string
+  updated_at: string
+  pull_request?: { merged_at: string | null }
+}
+
+// Turns a PR body's Markdown into one plain-text line for the card. Prefers
+// the paragraph under a "## Summary" heading (the convention used across
+// these PRs); falls back to the first real paragraph otherwise.
+function extractDesc(body: string | null): string {
+  if (!body) return 'No description provided.'
+  const lines = body.replace(/\r\n/g, '\n').split('\n')
+  const isSkippable = (l: string) =>
+    l === '' || /^#{1,6}\s/.test(l) || /^fixes\s+#\d+\.?$/i.test(l) || /^>/.test(l) || /^```/.test(l)
+
+  const collectParagraph = (from: number): string[] => {
+    const buf: string[] = []
+    for (let i = from; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (isSkippable(line)) {
+        if (buf.length) break
+        else continue
+      }
+      buf.push(line)
+    }
+    return buf
+  }
+
+  const summaryIdx = lines.findIndex(l => /^#{1,6}\s*summary\b/i.test(l.trim()))
+  let buf = summaryIdx >= 0 ? collectParagraph(summaryIdx + 1) : []
+  if (!buf.length) buf = collectParagraph(0)
+
+  let text = buf
+    .join(' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\*\*([^*]*)\*\*/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+  if (text.length > 160) text = text.slice(0, 157).trimEnd() + '…'
+  return text || 'No description provided.'
+}
+
+const PAGE_SIZE = 4
 
 export default function OpenSource() {
+  const [contributions, setContributions] = useState<Contribution[]>([])
+  const [loading, setLoading] = useState(true)
+  const [statusTab, setStatusTab] = useState<'all' | Status>('all')
+  const [orgTab, setOrgTab] = useState('all')
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+
+  useEffect(() => {
+    const ownRepoPrefix = GITHUB_USERNAME.toLowerCase() + '/'
+
+    fetch(`https://api.github.com/search/issues?q=author:${GITHUB_USERNAME}+type:pr&per_page=100&sort=updated`)
+      .then(r => r.json())
+      .then((data: { items?: GithubSearchItem[] }) => {
+        if (!Array.isArray(data.items)) throw new Error('Unexpected API response')
+
+        const entries: Contribution[] = []
+        data.items.forEach(item => {
+          const repo = item.repository_url.replace('https://api.github.com/repos/', '')
+          // Contributions to other people's projects only — skip PRs against
+          // my own repos, which this author-search otherwise pulls in too.
+          if (repo.toLowerCase().startsWith(ownRepoPrefix)) return
+          const isMerged = !!item.pull_request?.merged_at
+          if (!isMerged && item.state !== 'open') return // closed, unmerged
+
+          entries.push({
+            status: isMerged ? 'merged' : 'open',
+            repo,
+            title: item.title,
+            desc: extractDesc(item.body),
+            url: item.html_url,
+            updated: item.updated_at,
+          })
+        })
+
+        // Sort open+merged together by real update date so "All" (and any
+        // org filter spanning both) shows the truly latest activity first,
+        // instead of every open PR listed before every merged one.
+        entries.sort((a, b) => new Date(b.updated).getTime() - new Date(a.updated).getTime())
+        setContributions(entries)
+      })
+      .catch(() => setContributions([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const orgCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    contributions.forEach(c => {
+      const org = orgDisplayName(c.repo)
+      counts[org] = (counts[org] || 0) + 1
+    })
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])
+  }, [contributions])
+
+  const openCount = contributions.filter(c => c.status === 'open').length
+  const mergedCount = contributions.filter(c => c.status === 'merged').length
+  const repoCount = new Set(contributions.map(c => c.repo)).size
+
+  const visibleItems = contributions.filter(
+    c => (statusTab === 'all' || c.status === statusTab) && (orgTab === 'all' || orgDisplayName(c.repo) === orgTab)
+  )
+  const page = visibleItems.slice(0, visibleCount)
+  const remaining = visibleItems.length - page.length
+
+  function selectStatus(tab: 'all' | Status) {
+    setStatusTab(tab)
+    setVisibleCount(PAGE_SIZE)
+  }
+
+  function selectOrg(org: string) {
+    setOrgTab(org)
+    // Most orgs only have a couple of contributions, often all in one status
+    // bucket — leaving a narrow status tab active meant picking most orgs
+    // landed on a silent empty grid. Jump to "All" so every org selection
+    // shows something; status tabs remain there to narrow down from there.
+    setStatusTab('all')
+    setVisibleCount(PAGE_SIZE)
+  }
+
+  const STATUS_TABS: { key: 'all' | Status; label: string; count: number }[] = [
+    { key: 'all', label: 'All', count: contributions.length },
+    { key: 'open', label: 'Open PRs', count: openCount },
+    { key: 'merged', label: 'Merged', count: mergedCount },
+  ]
+
   return (
     <section id="opensource" className="py-20 md:py-28 px-6 md:px-10 lg:px-16" style={{ background: 'hsl(0 0% 4%)' }}>
       <div className="max-w-[1200px] mx-auto">
@@ -32,15 +181,15 @@ export default function OpenSource() {
             <span className="italic" style={{ fontFamily: "'Instrument Serif', serif" }}>Contributions</span>
           </h2>
           <p className="text-sm max-w-xl mb-10" style={{ color: 'hsl(0 0% 45%)', lineHeight: 1.7 }}>
-            9 merged PRs across 4 organisations — deepset-ai/haystack, haystack-core-integrations,
-            openclaw, and langchain-ai/langsmith-sdk. 12+ open PRs across LangChain, LangSmith,
-            and haystack-core-integrations.
+            {loading
+              ? 'Loading live contribution history from GitHub...'
+              : `${mergedCount} merged PR${mergedCount === 1 ? '' : 's'} and ${openCount} open across ${orgCounts.length} organisation${orgCounts.length === 1 ? '' : 's'} — pulled live from GitHub, newest activity first.`}
           </p>
         </motion.div>
 
         {/* Featured cards */}
         <motion.div
-          className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"
+          className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8"
           variants={fadeInUp} initial="hidden" whileInView="visible" viewport={{ once: true }}
         >
           {/* Microsoft card */}
@@ -71,7 +220,7 @@ export default function OpenSource() {
             </div>
           </div>
 
-          {/* Stats card */}
+          {/* Stats card — live counts from the fetch above */}
           <div
             className="rounded-2xl border p-6 flex flex-col justify-between"
             style={{ borderColor: 'hsl(0 0% 10%)', background: 'hsl(0 0% 6%)' }}
@@ -80,12 +229,11 @@ export default function OpenSource() {
               // contribution.stats
             </p>
             {[
-              { key: 'total_merged',  val: '9 PRs',                     green: true  },
-              { key: 'orgs',          val: '4 organisations',            green: false },
-              { key: 'haystack',      val: '5 merged (core + integrations)', green: true },
-              { key: 'openclaw',      val: '3 merged',                   green: true  },
-              { key: 'langsmith_sdk', val: '1 merged',                   green: true  },
-              { key: 'open_prs',      val: '12+ across LangChain + more',green: false },
+              { key: 'total_open+merged', val: `${contributions.length} PRs`, green: false },
+              { key: 'merged', val: `${mergedCount} merged`, green: true },
+              { key: 'open', val: `${openCount} open`, green: false },
+              { key: 'organisations', val: `${orgCounts.length}`, green: false },
+              { key: 'repos_touched', val: `${repoCount}`, green: false },
             ].map(({ key, val, green }) => (
               <div
                 key={key}
@@ -93,55 +241,131 @@ export default function OpenSource() {
                 style={{ borderColor: 'hsl(0 0% 9%)', fontFamily: 'monospace', fontSize: '12px' }}
               >
                 <span style={{ color: 'hsl(0 0% 45%)' }}>{key}</span>
-                <span style={{ color: green ? '#00e676' : '#89aacc' }}>{val}</span>
+                <span style={{ color: green ? '#00e676' : '#89aacc' }}>{loading ? '…' : val}</span>
               </div>
             ))}
           </div>
         </motion.div>
 
-        {/* All 9 PRs table */}
-        <motion.div
-          className="rounded-2xl border overflow-hidden"
-          style={{ borderColor: 'hsl(0 0% 10%)', background: 'hsl(0 0% 6%)' }}
-          variants={fadeInUp} initial="hidden" whileInView="visible" viewport={{ once: true }}
-        >
-          {/* Header */}
-          <div
-            className="grid px-5 py-3 border-b text-xs uppercase tracking-widest"
-            style={{
-              borderColor: 'hsl(0 0% 9%)',
-              background: 'hsl(0 0% 5%)',
-              color: 'hsl(0 0% 35%)',
-              fontFamily: 'monospace',
-              gridTemplateColumns: '64px 1fr 220px 72px 64px',
-            }}
-          >
-            <span>PR</span><span>Title</span><span className="hidden md:block">Repo</span><span className="hidden md:block">Date</span><span>Status</span>
-          </div>
-          {PR_ROWS.map((pr, i) => (
-            <div
-              key={pr.num}
-              className="grid items-center gap-3 px-5 py-3.5 transition-colors duration-150"
-              style={{
-                borderBottom: i < PR_ROWS.length - 1 ? '1px solid hsl(0 0% 8%)' : 'none',
-                gridTemplateColumns: '64px 1fr 220px 72px 64px',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(137,170,204,0.03)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+        {/* Status tabs */}
+        <motion.div className="flex flex-wrap gap-2 mb-3" variants={fadeInUp} initial="hidden" whileInView="visible" viewport={{ once: true }}>
+          {STATUS_TABS.map(({ key, label, count }) => (
+            <button
+              key={key}
+              onClick={() => selectStatus(key)}
+              className="rounded-full px-4 py-1.5 text-xs font-medium transition-all duration-200 border"
+              style={statusTab === key
+                ? { background: 'rgba(255,255,255,0.10)', color: 'hsl(0 0% 92%)', borderColor: 'rgba(137,170,204,0.3)' }
+                : { background: 'transparent', color: 'hsl(0 0% 50%)', borderColor: 'hsl(0 0% 12%)' }
+              }
             >
-              <span className="text-xs" style={{ color: 'hsl(0 0% 35%)', fontFamily: 'monospace' }}>{pr.num}</span>
-              <span className="text-xs leading-5" style={{ color: 'hsl(0 0% 72%)', fontFamily: 'monospace' }}>{pr.title}</span>
-              <span className="text-xs hidden md:block truncate" style={{ color: 'hsl(0 0% 38%)', fontFamily: 'monospace' }}>{pr.repo}</span>
-              <span className="text-xs hidden md:block" style={{ color: 'hsl(0 0% 35%)', fontFamily: 'monospace' }}>{pr.date}</span>
-              <span
-                className="text-xs px-2 py-0.5 rounded justify-self-start"
-                style={{ background: 'rgba(0,230,118,0.08)', color: '#00e676' }}
-              >
-                merged
-              </span>
-            </div>
+              {label}{count > 0 ? ` (${count})` : ''}
+            </button>
           ))}
         </motion.div>
+
+        {/* Org tabs */}
+        {orgCounts.length > 0 && (
+          <motion.div className="flex flex-wrap gap-2 mb-8" variants={fadeInUp} initial="hidden" whileInView="visible" viewport={{ once: true }}>
+            <button
+              onClick={() => selectOrg('all')}
+              className="rounded-full px-3 py-1 text-[11px] font-medium transition-all duration-200 border"
+              style={orgTab === 'all'
+                ? { background: 'rgba(137,170,204,0.12)', color: '#89aacc', borderColor: 'rgba(137,170,204,0.3)' }
+                : { background: 'transparent', color: 'hsl(0 0% 42%)', borderColor: 'hsl(0 0% 10%)' }
+              }
+            >
+              All orgs ({contributions.length})
+            </button>
+            {orgCounts.map(([org, count]) => (
+              <button
+                key={org}
+                onClick={() => selectOrg(org)}
+                className="rounded-full px-3 py-1 text-[11px] font-medium transition-all duration-200 border"
+                style={orgTab === org
+                  ? { background: 'rgba(137,170,204,0.12)', color: '#89aacc', borderColor: 'rgba(137,170,204,0.3)' }
+                  : { background: 'transparent', color: 'hsl(0 0% 42%)', borderColor: 'hsl(0 0% 10%)' }
+                }
+              >
+                {org} ({count})
+              </button>
+            ))}
+          </motion.div>
+        )}
+
+        {/* Contribution grid */}
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border h-32 animate-pulse" style={{ borderColor: 'hsl(0 0% 9%)', background: 'hsl(0 0% 6%)' }} />
+            ))}
+          </div>
+        ) : page.length === 0 ? (
+          <div
+            className="rounded-2xl border p-8 text-center text-sm"
+            style={{ borderColor: 'hsl(0 0% 10%)', background: 'hsl(0 0% 6%)', color: 'hsl(0 0% 40%)' }}
+          >
+            No {statusTab === 'all' ? '' : `${statusTab} `}items{orgTab === 'all' ? '' : ` for ${orgTab}`} yet — try another tab above.
+          </div>
+        ) : (
+          <>
+            <motion.div
+              key={`${statusTab}-${orgTab}`}
+              className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              {page.map(item => (
+                <a
+                  key={item.url}
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex flex-col rounded-2xl border p-5 transition-all duration-200 hover:-translate-y-1 no-underline"
+                  style={{ borderColor: 'hsl(0 0% 10%)', background: 'hsl(0 0% 6%)' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(137,170,204,0.22)' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'hsl(0 0% 10%)' }}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-xs truncate" style={{ color: 'hsl(0 0% 40%)', fontFamily: 'monospace' }}>{item.repo}</span>
+                    <span
+                      className="text-xs px-2 py-0.5 rounded shrink-0"
+                      style={item.status === 'merged'
+                        ? { background: 'rgba(0,230,118,0.08)', color: '#00e676' }
+                        : { background: 'rgba(137,170,204,0.1)', color: '#89aacc' }
+                      }
+                    >
+                      {item.status === 'merged' ? 'Merged' : 'Open'}
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold leading-snug mb-2" style={{ color: 'hsl(0 0% 88%)' }}>{item.title}</p>
+                  <p className="text-xs leading-5 flex-1" style={{ color: 'hsl(0 0% 48%)' }}>{item.desc}</p>
+                  <span className="mt-3 text-xs opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: '#89aacc' }}>
+                    View pull request ↗
+                  </span>
+                </a>
+              ))}
+            </motion.div>
+
+            {remaining > 0 && (
+              <div className="flex justify-center mt-8">
+                <button
+                  onClick={() => setVisibleCount(v => v + PAGE_SIZE)}
+                  className="flex items-center gap-2 rounded-full px-6 py-2.5 text-xs font-medium border transition-all duration-200"
+                  style={{ background: 'rgba(255,255,255,0.05)', color: 'hsl(0 0% 75%)', borderColor: 'rgba(255,255,255,0.14)' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.12)'; (e.currentTarget as HTMLElement).style.color = '#fff' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; (e.currentTarget as HTMLElement).style.color = 'hsl(0 0% 75%)' }}
+                >
+                  More ({remaining})
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </section>
   )
