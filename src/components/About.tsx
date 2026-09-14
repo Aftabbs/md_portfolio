@@ -1,4 +1,6 @@
 import { motion } from 'framer-motion'
+import { orgDisplayName, useContributions } from '../hooks/useContributions'
+import { useGithubStats } from '../hooks/useGithubStats'
 
 const CHIPS = [
   'LLM Engineering', 'Agentic Systems', 'RAG Architecture', 'AI Guardrails',
@@ -12,6 +14,14 @@ const fadeInUp = {
 }
 
 export default function About() {
+  const { contributions } = useContributions()
+  const { publicRepos, featuredStars } = useGithubStats()
+
+  const mergedCount = contributions.filter(c => c.status === 'merged').length
+  const orgNames = Array.from(new Set(contributions.map(c => orgDisplayName(c.repo))))
+  const orgCount = orgNames.length
+  const orgListText = orgNames.length > 0 ? ` (${orgNames.slice(0, 4).join(', ')}${orgNames.length > 4 ? ', +more' : ''})` : ''
+
   return (
     <section
       id="about"
@@ -63,11 +73,10 @@ export default function About() {
               Senior AI Engineer specializing in LLM engineering, agentic system design, and
               AI evaluation — building production-grade AI systems for enterprises including
               JP Morgan, PwC, Morgan Stanley, and Experian. Created the first-ever Python MCP
-              servers for Microsoft Azure Cosmos DB (64★, pinned on official org).
+              servers for Microsoft Azure Cosmos DB ({featuredStars ?? '…'}★, pinned on official org).
             </p>
             <p className="text-sm leading-7 mb-6" style={{ color: 'hsl(0 0% 53%)' }}>
-              9 merged PRs across 4 open-source orgs (Haystack, Haystack-core-integrations,
-              openclaw, LangSmith SDK). My work spans guardrail infrastructure, multi-agent
+              {mergedCount} merged PRs across {orgCount} open-source org{orgCount === 1 ? '' : 's'}{orgListText}. My work spans guardrail infrastructure, multi-agent
               orchestration, GraphRAG, NL2SQL pipelines, and AI evaluation. 50+ technical
               articles on Medium — from LLM architecture to AI investment dynamics.
             </p>
@@ -123,9 +132,9 @@ export default function About() {
               <p>&nbsp;</p>
               <p>&nbsp;&nbsp;<span style={{ color: '#c678dd' }}>def</span> <span style={{ color: '#61afef' }}>profile</span>(<span style={{ color: '#e5c07b' }}>self</span>):</p>
               <p>&nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#c678dd' }}>return</span> {'{'}</p>
-              <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#ffab00' }}>"oss_prs"</span>: <span style={{ color: '#d19a66' }}>9</span>, <span style={{ color: '#4a5568' }}># merged across 4 orgs</span></p>
+              <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#ffab00' }}>"oss_prs"</span>: <span style={{ color: '#d19a66' }}>{mergedCount}</span>, <span style={{ color: '#4a5568' }}># merged across {orgCount} orgs</span></p>
               <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#ffab00' }}>"articles"</span>: <span style={{ color: '#d19a66' }}>50</span>,</p>
-              <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#ffab00' }}>"repos"</span>: <span style={{ color: '#d19a66' }}>175</span>,</p>
+              <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#ffab00' }}>"repos"</span>: <span style={{ color: '#d19a66' }}>{publicRepos ?? '…'}</span>,</p>
               <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#ffab00' }}>"microsoft_oss"</span>: <span style={{ color: '#00e676' }}>True</span>,</p>
               <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style={{ color: '#ffab00' }}>"status"</span>: <span style={{ color: '#00e676' }}>"online"</span></p>
               <p>&nbsp;&nbsp;&nbsp;&nbsp;{'}'}</p>
@@ -146,10 +155,10 @@ export default function About() {
           viewport={{ once: true }}
         >
           {[
-            { num: '3+',   label: 'Years in AI'       },
-            { num: '175+', label: 'Public Repos'     },
-            { num: '50+',  label: 'Medium Articles'  },
-            { num: '9',    label: 'Merged OSS PRs'   },
+            { num: '3+',                                label: 'Years in AI'      },
+            { num: publicRepos !== null ? `${publicRepos}+` : '…', label: 'Public Repos'    },
+            { num: '50+',                                label: 'Medium Articles' },
+            { num: String(mergedCount),                  label: 'Merged OSS PRs'  },
           ].map(({ num, label }) => (
             <div key={label} className="text-center">
               <p
