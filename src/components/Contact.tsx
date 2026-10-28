@@ -70,7 +70,7 @@ export default function Contact() {
     <section
       id="contact"
       className="relative py-20 md:py-28 px-6 md:px-10 lg:px-16 overflow-hidden"
-      style={{ background: 'hsl(0 0% 4%)' }}
+      style={{ background: 'transparent' }}
     >
       {/* Background video flipped */}
       <div className="absolute inset-0 overflow-hidden" style={{ transform: 'scaleY(-1)', opacity: 0.15 }}>
@@ -85,13 +85,14 @@ export default function Contact() {
       <div className="relative z-10 max-w-[1200px] mx-auto">
         <div className="flex items-center gap-3 mb-8">
           <div className="w-8 h-px" style={{ background: 'hsl(0 0% 12%)' }} />
-          <span className="text-xs uppercase tracking-[0.3em]" style={{ color: 'hsl(0 0% 53%)' }}>06 · contact.ssh</span>
+          <span data-koi-avoid="text" className="text-xs uppercase tracking-[0.3em]" style={{ color: 'hsl(0 0% 53%)' }}>06 · contact.ssh</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-16 items-start">
           {/* Left */}
           <motion.div variants={fadeInUp} initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-100px' }}>
             <h2
+              data-koi-avoid="text"
               className="text-4xl md:text-5xl font-semibold tracking-tight mb-5 leading-[1.1]"
               style={{ color: 'hsl(0 0% 96%)', fontFamily: "'Instrument Serif', serif", fontStyle: 'italic' }}
             >
@@ -99,11 +100,11 @@ export default function Contact() {
               <br />something
               <br />remarkable.
             </h2>
-            <p className="text-sm mb-8" style={{ color: 'hsl(0 0% 50%)', lineHeight: 1.8 }}>
+            <p data-koi-avoid="text" className="text-sm mb-8" style={{ color: 'hsl(0 0% 50%)', lineHeight: 1.8 }}>
               Open to collaborations on LLM infrastructure, agentic workflow design, AI governance,
               and frontier research. Always up for a conversation about where AI is actually going.
             </p>
-            <div className="flex flex-col gap-3">
+            <div data-koi-avoid className="flex flex-col gap-3">
               {CONTACT_LINKS.map(({ icon, label, val, href }) => (
                 <a
                   key={label}
@@ -128,6 +129,7 @@ export default function Contact() {
 
           {/* Right: system status */}
           <motion.div
+            data-koi-avoid
             className="rounded-2xl border p-6"
             style={{ borderColor: 'hsl(0 0% 10%)', background: 'hsl(0 0% 6%)' }}
             variants={fadeInUp} initial="hidden" whileInView="visible" viewport={{ once: true }}
