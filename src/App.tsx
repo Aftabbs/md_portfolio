@@ -11,6 +11,7 @@ import OpenSource from './components/OpenSource'
 import Articles from './components/Articles'
 import Contact from './components/Contact'
 import Footer from './components/Footer'
+import KoiAquarium from './components/koi/KoiAquarium'
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true)
@@ -31,9 +32,11 @@ export default function App() {
             <Projects />
             <OpenSource />
             <Articles />
-            <Contact />
           </main>
-          <Footer />
+          <KoiAquarium>
+            <Contact />
+            <Footer />
+          </KoiAquarium>
         </>
       )}
     </>
